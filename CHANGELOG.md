@@ -2,6 +2,12 @@
 
 All notable changes to AutoToC will be documented in this file.
 
+## [0.1.4] - 2026-06-23
+
+- Refined collapsed icon alignment with right-side spacing.
+- Adjusted collapsed heading bar lengths to improve visual distinction by heading level.
+- Fixed question labels so two-line clamping does not expose a partial third line.
+
 ## [0.1.3] - 2026-06-23
 
 - Kept the collapsed icon column and expanded panel centered on the right edge of the viewport.
