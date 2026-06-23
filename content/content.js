@@ -9,7 +9,7 @@
     try {
       window[GLOBAL_CLEANUP_KEY]();
     } catch (error) {
-      console.warn("[AutoToC] Failed to cleanup previous instance", error);
+      console.error("[AutoToC] Failed to cleanup previous instance", error);
     }
   }
 
@@ -31,8 +31,6 @@
   const NATIVE_MINIMAP_MIN_BARS = 5;
   const NATIVE_MINIMAP_HIDDEN_ATTR = "data-autotoc-hidden-native-minimap";
   const NATIVE_MINIMAP_SCAN_DELAY_MS = 120;
-  const DEBUG_STORAGE_KEY = "autotocDebug";
-  const DEBUG_DEFAULT_ENABLED = true;
 
   function createDefaultState() {
     return {
@@ -61,9 +59,7 @@
       nativeMinimapObserver: null,
       nativeMinimapScanTimeout: null,
       hiddenNativeMinimapElements: new Set(),
-      nextFallbackOrder: 0,
-      lastDebugActiveSignature: null,
-      lastDebugRenderSignature: null
+      nextFallbackOrder: 0
     };
   }
 
@@ -111,29 +107,6 @@
         fn(...args);
       }, delay));
     };
-  }
-
-  function isDebugEnabled() {
-    try {
-      const value = window.localStorage?.getItem(DEBUG_STORAGE_KEY);
-      if (value === "0" || value === "false") return false;
-      if (value === "1" || value === "true") return true;
-    } catch (error) {
-      return DEBUG_DEFAULT_ENABLED;
-    }
-
-    return DEBUG_DEFAULT_ENABLED;
-  }
-
-  function debugLog(label, payload = {}) {
-    if (!isDebugEnabled()) return;
-    console.log(`[AutoToC] ${label}`, payload);
-  }
-
-  function debugTable(label, rows) {
-    if (!isDebugEnabled()) return;
-    console.log(`[AutoToC] ${label}`);
-    console.table(rows);
   }
 
   function getScrollTop(scrollContainer = state.scrollContainer) {
@@ -275,62 +248,6 @@
     return state.nextFallbackOrder;
   }
 
-  function summarizeBlock(qaBlock) {
-    return {
-      key: qaBlock.key,
-      order: qaBlock.order,
-      mounted: qaBlock.isMounted,
-      startY: Math.round(qaBlock.startY),
-      headings: qaBlock.headings.length,
-      question: normalizeText(qaBlock.questionText, 80)
-    };
-  }
-
-  function debugActiveState(referenceY, qaReferenceY, activeBlock) {
-    const signature = [
-      Math.round(referenceY),
-      Math.round(qaReferenceY),
-      state.activeQAKey || "none",
-      state.activeHeadingIndex
-    ].join(":");
-
-    if (signature === state.lastDebugActiveSignature) return;
-    state.lastDebugActiveSignature = signature;
-
-    debugLog("active state", {
-      referenceY: Math.round(referenceY),
-      qaReferenceY: Math.round(qaReferenceY),
-      qaActivationOffset: QA_ACTIVATION_OFFSET_PX,
-      activeQAKey: state.activeQAKey,
-      activeQAIndex: state.activeQAIndex,
-      activeHeadingIndex: state.activeHeadingIndex,
-      activeQuestion: activeBlock ? normalizeText(activeBlock.questionText, 100) : null,
-      activeHeadings: activeBlock?.headings.length || 0,
-      mounted: activeBlock?.isMounted || false
-    });
-  }
-
-  function debugRenderState() {
-    const activeBlock = state.qaBlocks.find((qaBlock) => qaBlock.key === state.activeQAKey);
-    const signature = [
-      state.qaBlocks.length,
-      state.activeQAKey || "none",
-      activeBlock?.headings.length || 0
-    ].join(":");
-
-    if (signature === state.lastDebugRenderSignature) return;
-    state.lastDebugRenderSignature = signature;
-
-    debugLog("render", {
-      renderedQuestions: state.qaBlocks.length,
-      mountedQuestions: state.qaBlocks.filter((qaBlock) => qaBlock.isMounted).length,
-      activeQAKey: state.activeQAKey,
-      activeQuestion: activeBlock ? normalizeText(activeBlock.questionText, 100) : null,
-      activeHeadings: activeBlock?.headings.length || 0,
-      activeMounted: activeBlock?.isMounted || false
-    });
-  }
-
   function collectAnswerElementsBetween(currentQuestion, nextQuestion) {
     return Array.from(getMessageSearchRoot().querySelectorAll(SELECTORS.assistantMessage)).filter((answerElement) => {
       const followsQuestion = Boolean(
@@ -403,23 +320,16 @@
       }));
   }
 
-  function pruneCachedBlocksAfter(order, keepKey, reason) {
-    const removed = [];
-
+  function pruneCachedBlocksAfter(order, keepKey) {
+    let removed = false;
     for (const [key, qaBlock] of state.qaCache.entries()) {
       if (key !== keepKey && qaBlock.order > order) {
-        removed.push(summarizeBlock(qaBlock));
+        removed = true;
         state.qaCache.delete(key);
       }
     }
 
-    if (!removed.length) return false;
-
-    debugLog("pruned cached branch tail", {
-      reason,
-      afterOrder: order,
-      removed
-    });
+    if (!removed) return false;
     refreshQABlocksFromCache();
     return true;
   }
@@ -473,13 +383,6 @@
     refreshQABlocksFromCache();
     markStreamingBlock();
 
-    debugTable("parseQABlocks", state.qaBlocks.map(summarizeBlock));
-    debugLog("parse summary", {
-      visibleQuestions: userMessages.length,
-      cachedQuestions: state.qaBlocks.length,
-      scrollTop: Math.round(getScrollTop()),
-      scrollContainer: state.scrollContainer?.tagName || "unknown"
-    });
   }
 
   function filterHeadings(headings) {
@@ -509,24 +412,10 @@
     const collapsedItemCount = state.qaBlocks.length + headings.length;
     const fitsViewport = collapsedItemCount * COLLAPSED_ITEM_HEIGHT <= viewportHeight * COLLAPSED_HEIGHT_LIMIT_RATIO;
     if (!fitsViewport) {
-      debugLog("collapsed headings summarized", {
-        reason: "height limit",
-        collapsedItemCount,
-        viewportHeight,
-        limitRatio: COLLAPSED_HEIGHT_LIMIT_RATIO
-      });
       return "summary";
     }
 
     if (hasTightHeadingSpacing(headings)) {
-      debugLog("collapsed headings summarized", {
-        reason: "tight heading spacing",
-        minGap: COLLAPSED_HEADING_MIN_SCROLL_GAP,
-        headings: headings.map((heading) => ({
-          text: normalizeText(heading.text, 80),
-          y: Math.round(heading.y)
-        }))
-      });
       return "summary";
     }
 
@@ -633,17 +522,6 @@
     return horizontalBar || verticalBar;
   }
 
-  function getElementDescriptor(element) {
-    return {
-      tagName: element.tagName,
-      id: element.id || null,
-      className: typeof element.className === "string" ? element.className : null,
-      role: element.getAttribute("role"),
-      testId: element.getAttribute("data-testid"),
-      ariaLabel: element.getAttribute("aria-label")
-    };
-  }
-
   function collectNativeMinimapCandidates() {
     const candidates = [];
     const elements = Array.from(document.body?.querySelectorAll("aside, nav, ol, ul, section, div") || []);
@@ -695,22 +573,6 @@
       state.hiddenNativeMinimapElements.add(candidate.element);
     }
 
-    debugLog("native right rail minimap suppressed", {
-      hiddenCount: selectedCandidates.length,
-      minBars: NATIVE_MINIMAP_MIN_BARS,
-      candidates: selectedCandidates.map((candidate) => ({
-        ...getElementDescriptor(candidate.element),
-        barCount: candidate.barCount,
-        rect: {
-          top: Math.round(candidate.rect.top),
-          right: Math.round(candidate.rect.right),
-          bottom: Math.round(candidate.rect.bottom),
-          left: Math.round(candidate.rect.left),
-          width: Math.round(candidate.rect.width),
-          height: Math.round(candidate.rect.height)
-        }
-      }))
-    });
   }
 
   function scheduleNativeMinimapSuppression() {
@@ -860,8 +722,6 @@
     state.collapsed.replaceChildren();
     state.panel.replaceChildren();
     state.root.classList.toggle("is-empty", state.qaBlocks.length === 0);
-    debugRenderState();
-
     for (const qaBlock of state.qaBlocks) {
       state.collapsed.append(createCollapsedQuestionItem(qaBlock));
       state.panel.append(createPanelQuestionItem(qaBlock));
@@ -982,8 +842,6 @@
     }
 
     state.activeHeadingIndex = nextHeadingIndex;
-    debugActiveState(referenceY, qaReferenceY, activeBlock);
-
     if (previousQAKey !== state.activeQAKey || previousQAIndex !== state.activeQAIndex) {
       scheduleActiveQARender();
     } else if (previousHeadingIndex !== state.activeHeadingIndex) {
@@ -1019,31 +877,19 @@
     syncViewportCenter();
   }
 
-  function scrollToElementOrY(element, y, debugContext) {
+  function scrollToElementOrY(element, y) {
     if (element?.isConnected) {
-      debugLog("scroll to element", debugContext);
       element.scrollIntoView?.({ behavior: "smooth", block: "start" });
       return;
     }
 
-    debugLog("scroll to cached y", {
-      ...debugContext,
-      y: Math.round(y)
-    });
     scrollToY(y);
   }
 
-  function activateBlock(qaBlock, headingIndex = -1, reason = "manual activation") {
+  function activateBlock(qaBlock, headingIndex = -1) {
     state.activeQAIndex = qaBlock.index;
     state.activeQAKey = qaBlock.key;
     state.activeHeadingIndex = headingIndex;
-    debugLog("manual active state", {
-      reason,
-      activeQAKey: state.activeQAKey,
-      activeQAIndex: state.activeQAIndex,
-      activeHeadingIndex: state.activeHeadingIndex,
-      question: normalizeText(qaBlock.questionText, 100)
-    });
     renderUI();
   }
 
@@ -1052,28 +898,12 @@
       ? getElementTopRelativeToScrollContainer(qaBlock.questionElement, state.scrollContainer)
       : qaBlock.startY;
     const targetY = Math.max(0, blockY - QUESTION_SCROLL_MARGIN_PX);
-    activateBlock(qaBlock, -1, "question click");
-    debugLog("scroll to question anchor", {
-      type: "question",
-      key: qaBlock.key,
-      order: qaBlock.order,
-      question: normalizeText(qaBlock.questionText, 100),
-      mounted: qaBlock.isMounted,
-      blockY: Math.round(blockY),
-      targetY: Math.round(targetY),
-      qaActivationOffset: QA_ACTIVATION_OFFSET_PX,
-      scrollMargin: QUESTION_SCROLL_MARGIN_PX
-    });
+    activateBlock(qaBlock);
     scrollToY(targetY);
   }
 
   function scrollToHeading(heading) {
-    scrollToElementOrY(heading.element, heading.y, {
-      type: "heading",
-      level: heading.level,
-      heading: normalizeText(heading.text, 100),
-      mounted: Boolean(heading.element?.isConnected)
-    });
+    scrollToElementOrY(heading.element, heading.y);
   }
 
   function hasStreamingIndicator() {
@@ -1115,13 +945,12 @@
     const streamingBlock = findStreamingBlock();
     if (!streamingBlock) return;
 
-    pruneCachedBlocksAfter(streamingBlock.order, streamingBlock.key, "streaming block became tail");
+    pruneCachedBlocksAfter(streamingBlock.order, streamingBlock.key);
     const currentStreamingBlock = state.qaBlocks.find((qaBlock) => qaBlock.key === streamingBlock.key) || streamingBlock;
 
     currentStreamingBlock.isStreaming = true;
     currentStreamingBlock.headings = [];
     startStreamingPoll(currentStreamingBlock.key);
-    debugLog("streaming block", summarizeBlock(currentStreamingBlock));
   }
 
   function startStreamingPoll(qaKey) {
@@ -1135,7 +964,6 @@
       clearInterval(pollId);
       qaBlock.pollingInterval = null;
       qaBlock.isStreaming = false;
-      debugLog("streaming complete", { qaKey });
       rebuild();
     }, 800));
 
@@ -1159,11 +987,6 @@
 
     const observer = new MutationObserver((mutations) => {
       if (mutations.some((mutation) => mutation.type === "childList" || mutation.type === "characterData")) {
-        debugLog("mutation", {
-          target: target.tagName || "unknown",
-          childList: mutations.filter((mutation) => mutation.type === "childList").length,
-          characterData: mutations.filter((mutation) => mutation.type === "characterData").length
-        });
         scheduleNativeMinimapSuppression();
         debouncedRebuild();
       }
@@ -1183,10 +1006,6 @@
   function setupTemporaryBodyObserver() {
     const observer = new MutationObserver((mutations) => {
       if (mutations.some((mutation) => mutation.type === "childList" || mutation.type === "characterData")) {
-        debugLog("temporary body mutation", {
-          childList: mutations.filter((mutation) => mutation.type === "childList").length,
-          characterData: mutations.filter((mutation) => mutation.type === "characterData").length
-        });
         scheduleNativeMinimapSuppression();
         debouncedRebuild();
       }
@@ -1251,11 +1070,6 @@
   function rebuild() {
     if (state.rebuilding) return;
     state.rebuilding = true;
-    debugLog("rebuild start", {
-      cachedQuestions: state.qaCache.size,
-      scrollTop: Math.round(getScrollTop())
-    });
-
     for (const intervalId of state.intervals) {
       clearInterval(intervalId);
     }
@@ -1277,11 +1091,6 @@
     setupViewportCenterTracking();
 
     state.rebuilding = false;
-    debugLog("rebuild complete", {
-      renderedQuestions: state.qaBlocks.length,
-      mountedQuestions: state.qaBlocks.filter((qaBlock) => qaBlock.isMounted).length,
-      activeQAKey: state.activeQAKey
-    });
   }
 
   function waitForConversationContent() {

@@ -2,6 +2,12 @@
 
 All notable changes to AutoToC will be documented in this file.
 
+## [1.0.1] - 2026-06-24
+
+- Remove non-error console diagnostics, debug state, and the local storage debug toggle.
+- Keep cleanup failures visible as errors.
+- Add a demo image, GPL-3.0 license, and concise English and Korean project documentation for the public repository.
+
 ## [1.0.0] - 2026-06-23
 
 - Promote AutoToC to its first stable release.
@@ -12,7 +18,6 @@ All notable changes to AutoToC will be documented in this file.
 
 - Restore collapsed question dot markers for every cached question while keeping the active answer ToC rendering unchanged.
 - Suppress ChatGPT/native right-rail minimap bar groups outside AutoToC when they overlap the collapsed icon area.
-- Add `[AutoToC] native right rail minimap suppressed` diagnostics for hidden non-AutoToC bar groups.
 
 ## [0.1.12] - 2026-06-23
 
@@ -41,7 +46,6 @@ All notable changes to AutoToC will be documented in this file.
 
 - Cache previously observed Q&A blocks so ChatGPT DOM virtualization does not shrink AutoToC to only nearby messages.
 - Keep cached heading labels and scroll positions available when their source DOM nodes are temporarily unmounted.
-- Add verbose `[AutoToC]` console diagnostics for parsing, rendering, active-scroll state, mutations, clicks, and streaming transitions.
 
 ## [0.1.7] - 2026-06-23
 
