@@ -2,6 +2,11 @@
 
 All notable changes to AutoToC will be documented in this file.
 
+## [0.1.6] - 2026-06-23
+
+- Lowered collapsed icon overflow threshold from 90% to 80% of the viewport height.
+- Lowered expanded panel maximum height from 90vh to 80vh.
+
 ## [0.1.5] - 2026-06-23
 
 - Hide collapsed heading bars when the collapsed icon list would exceed 90% of the viewport height.

@@ -32,7 +32,7 @@
 .autotoc-collapsed {
   width: var(--autotoc-collapsed-width);
   min-height: 42px;
-  max-height: 90vh;
+  max-height: 80vh;
   padding-right: 20px;
   overflow-x: hidden;
   overflow-y: hidden;
@@ -51,7 +51,7 @@
   top: 50%;
   width: min(var(--autotoc-expanded-width), calc(100vw - var(--autotoc-viewport-gap)));
   min-height: 42px;
-  max-height: 90vh;
+  max-height: 80vh;
   overflow-x: hidden;
   overflow-y: auto;
   opacity: 0;

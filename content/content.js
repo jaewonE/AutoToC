@@ -10,7 +10,7 @@
   };
 
   const COLLAPSED_ITEM_HEIGHT = 20;
-  const COLLAPSED_HEIGHT_LIMIT_RATIO = 0.9;
+  const COLLAPSED_HEIGHT_LIMIT_RATIO = 0.8;
 
   function createDefaultState() {
     return {
