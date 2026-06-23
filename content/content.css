@@ -26,33 +26,50 @@
 
 .autotoc-hover-zone {
   position: relative;
-  width: max-content;
+  width: var(--autotoc-collapsed-width);
   padding: 8px 0;
 }
 
-.autotoc-panel {
-  width: min(var(--autotoc-expanded-width), calc(100vw - var(--autotoc-viewport-gap)));
-  max-width: var(--autotoc-collapsed-width);
+.autotoc-collapsed {
+  width: var(--autotoc-collapsed-width);
   min-height: 42px;
   max-height: 80vh;
   overflow-x: hidden;
   overflow-y: hidden;
   opacity: 0.6;
-  transition:
-    max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 0.2s ease,
-    box-shadow 0.2s ease,
-    background-color 0.2s ease;
+  transition: opacity 0.2s ease;
 }
 
-.autotoc-hover-zone:hover .autotoc-panel {
-  max-width: min(var(--autotoc-expanded-width), calc(100vw - var(--autotoc-viewport-gap)));
+.autotoc-hover-zone:hover .autotoc-collapsed {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.autotoc-panel {
+  position: absolute;
+  right: 0;
+  top: 8px;
+  width: min(var(--autotoc-expanded-width), calc(100vw - var(--autotoc-viewport-gap)));
+  min-height: 42px;
+  max-height: 80vh;
+  overflow-x: hidden;
   overflow-y: auto;
-  opacity: 1;
+  opacity: 0;
+  pointer-events: none;
   background: #ffffff;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   border-radius: 8px;
   padding: 10px;
+  transform: translateX(12px);
+  transition:
+    opacity 0.2s ease,
+    transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.autotoc-hover-zone:hover .autotoc-panel {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
 }
 
 .autotoc-panel::-webkit-scrollbar {
@@ -76,17 +93,16 @@
   min-height: 20px;
 }
 
-.autotoc-item {
+.autotoc-panel .autotoc-item {
   min-height: 34px;
+}
+
+.autotoc-collapsed .autotoc-item {
+  min-height: 20px;
 }
 
 .autotoc-toc-group {
   width: 100%;
-}
-
-.autotoc-label,
-.autotoc-toc-label {
-  display: none;
 }
 
 .autotoc-icon,
@@ -96,21 +112,8 @@
   flex: 0 0 auto;
 }
 
-.autotoc-hover-zone:hover .autotoc-label {
-  display: -webkit-box;
-}
-
-.autotoc-hover-zone:hover .autotoc-toc-label {
-  display: block;
-}
-
-.autotoc-hover-zone:hover .autotoc-icon,
-.autotoc-hover-zone:hover .autotoc-dash,
-.autotoc-hover-zone:hover .autotoc-spinner {
-  display: none;
-}
-
 .autotoc-label {
+  display: -webkit-box;
   width: 100%;
   font-weight: 600;
   font-size: 16px;
@@ -138,6 +141,7 @@
 }
 
 .autotoc-toc-label {
+  display: block;
   width: 100%;
   font-weight: 400;
   font-size: 14px;

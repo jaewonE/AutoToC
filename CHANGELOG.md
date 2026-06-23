@@ -2,6 +2,11 @@
 
 All notable changes to AutoToC will be documented in this file.
 
+## [0.1.2] - 2026-06-23
+
+- Removed collapsed icon/text position synchronization by rendering the collapsed icon column separately from the expanded text panel.
+- Kept collapsed icon order aligned with question and heading order while allowing compact independent icon spacing.
+
 ## [0.1.1] - 2026-06-23
 
 - Simplified heading display policy.

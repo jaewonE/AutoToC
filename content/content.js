@@ -18,6 +18,7 @@
       scrollContainer: null,
       conversationContainer: null,
       root: null,
+      collapsed: null,
       panel: null,
       observers: [],
       intervals: [],
@@ -204,7 +205,7 @@
   }
 
   function ensureRoot() {
-    if (state.root?.isConnected && state.panel?.isConnected) return;
+    if (state.root?.isConnected && state.collapsed?.isConnected && state.panel?.isConnected) return;
 
     const root = document.createElement("div");
     root.className = "autotoc-root is-empty";
@@ -212,20 +213,25 @@
     const hoverZone = document.createElement("div");
     hoverZone.className = "autotoc-hover-zone";
 
+    const collapsed = document.createElement("div");
+    collapsed.className = "autotoc-collapsed";
+    collapsed.setAttribute("aria-hidden", "true");
+
     const panel = document.createElement("div");
     panel.className = "autotoc-panel";
     panel.setAttribute("role", "navigation");
     panel.setAttribute("aria-label", "Conversation table of contents");
 
-    hoverZone.append(panel);
+    hoverZone.append(collapsed, panel);
     root.append(hoverZone);
     document.documentElement.append(root);
 
     state.root = root;
+    state.collapsed = collapsed;
     state.panel = panel;
   }
 
-  function createQuestionItem(qaBlock) {
+  function createCollapsedQuestionItem(qaBlock) {
     const item = document.createElement("div");
     item.className = "autotoc-item";
     item.dataset.qa = String(qaBlock.index);
@@ -233,17 +239,27 @@
     const icon = document.createElement("div");
     icon.className = qaBlock.isStreaming ? "autotoc-spinner" : "autotoc-icon";
 
+    item.addEventListener("click", () => scrollToElement(qaBlock.questionElement));
+    item.append(icon);
+    return item;
+  }
+
+  function createPanelQuestionItem(qaBlock) {
+    const item = document.createElement("div");
+    item.className = "autotoc-item";
+    item.dataset.qa = String(qaBlock.index);
+
     const label = document.createElement("div");
     label.className = "autotoc-label";
     label.textContent = qaBlock.questionText;
     label.title = qaBlock.questionText;
 
     item.addEventListener("click", () => scrollToElement(qaBlock.questionElement));
-    item.append(icon, label);
+    item.append(label);
     return item;
   }
 
-  function createHeadingItem(heading, headingIndex) {
+  function createCollapsedHeadingItem(heading, headingIndex) {
     const item = document.createElement("div");
     item.className = "autotoc-toc-item";
     item.dataset.heading = String(headingIndex);
@@ -251,6 +267,21 @@
 
     const dash = document.createElement("div");
     dash.className = "autotoc-dash";
+
+    item.addEventListener("click", (event) => {
+      event.stopPropagation();
+      scrollToElement(heading.element);
+    });
+
+    item.append(dash);
+    return item;
+  }
+
+  function createPanelHeadingItem(heading, headingIndex) {
+    const item = document.createElement("div");
+    item.className = "autotoc-toc-item";
+    item.dataset.heading = String(headingIndex);
+    item.dataset.level = String(heading.level);
 
     const label = document.createElement("div");
     label.className = "autotoc-toc-label";
@@ -262,30 +293,36 @@
       scrollToElement(heading.element);
     });
 
-    item.append(dash, label);
+    item.append(label);
     return item;
   }
 
   function renderUI() {
     ensureRoot();
+    state.collapsed.replaceChildren();
     state.panel.replaceChildren();
     state.root.classList.toggle("is-empty", state.qaBlocks.length === 0);
 
     for (const qaBlock of state.qaBlocks) {
-      state.panel.append(createQuestionItem(qaBlock));
+      state.collapsed.append(createCollapsedQuestionItem(qaBlock));
+      state.panel.append(createPanelQuestionItem(qaBlock));
 
       if (qaBlock.index === state.activeQAIndex && !qaBlock.isStreaming) {
         const filteredHeadings = filterHeadings(qaBlock.headings);
         if (filteredHeadings.length) {
-          const tocGroup = document.createElement("div");
-          tocGroup.className = "autotoc-toc-group";
+          const collapsedTocGroup = document.createElement("div");
+          collapsedTocGroup.className = "autotoc-toc-group";
+          const panelTocGroup = document.createElement("div");
+          panelTocGroup.className = "autotoc-toc-group";
 
           for (const heading of filteredHeadings) {
             const originalIndex = qaBlock.headings.indexOf(heading);
-            tocGroup.append(createHeadingItem(heading, originalIndex));
+            collapsedTocGroup.append(createCollapsedHeadingItem(heading, originalIndex));
+            panelTocGroup.append(createPanelHeadingItem(heading, originalIndex));
           }
 
-          state.panel.append(tocGroup);
+          state.collapsed.append(collapsedTocGroup);
+          state.panel.append(panelTocGroup);
         }
       }
     }
@@ -294,18 +331,20 @@
   }
 
   function renderActiveState() {
-    if (!state.panel) return;
+    if (!state.root) return;
 
-    for (const element of state.panel.querySelectorAll(".is-active")) {
+    for (const element of state.root.querySelectorAll(".is-active")) {
       element.classList.remove("is-active");
     }
 
-    const activeQAItem = state.panel.querySelector(`.autotoc-item[data-qa="${state.activeQAIndex}"]`);
-    activeQAItem?.classList.add("is-active");
+    for (const activeQAItem of state.root.querySelectorAll(`.autotoc-item[data-qa="${state.activeQAIndex}"]`)) {
+      activeQAItem.classList.add("is-active");
+    }
 
     if (state.activeHeadingIndex >= 0) {
-      const activeHeadingItem = state.panel.querySelector(`.autotoc-toc-item[data-heading="${state.activeHeadingIndex}"]`);
-      activeHeadingItem?.classList.add("is-active");
+      for (const activeHeadingItem of state.root.querySelectorAll(`.autotoc-toc-item[data-heading="${state.activeHeadingIndex}"]`)) {
+        activeHeadingItem.classList.add("is-active");
+      }
     }
   }
 
