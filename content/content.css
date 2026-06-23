@@ -1,0 +1,219 @@
+.autotoc-root,
+.autotoc-root * {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  line-height: normal;
+}
+
+.autotoc-root {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 9999;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  pointer-events: auto;
+  --autotoc-collapsed-width: 120px;
+  --autotoc-expanded-width: 320px;
+  --autotoc-viewport-gap: 16px;
+}
+
+.autotoc-root.is-empty {
+  display: none;
+}
+
+.autotoc-hover-zone {
+  position: relative;
+  width: max-content;
+  padding: 8px 0;
+}
+
+.autotoc-panel {
+  width: min(var(--autotoc-expanded-width), calc(100vw - var(--autotoc-viewport-gap)));
+  max-width: var(--autotoc-collapsed-width);
+  min-height: 42px;
+  max-height: 80vh;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  opacity: 0.6;
+  transition:
+    max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.autotoc-hover-zone:hover .autotoc-panel {
+  max-width: min(var(--autotoc-expanded-width), calc(100vw - var(--autotoc-viewport-gap)));
+  overflow-y: auto;
+  opacity: 1;
+  background: #ffffff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.autotoc-panel::-webkit-scrollbar {
+  width: 3px;
+}
+
+.autotoc-panel::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 3px;
+}
+
+.autotoc-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.autotoc-item,
+.autotoc-toc-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 20px;
+}
+
+.autotoc-item {
+  min-height: 34px;
+}
+
+.autotoc-toc-group {
+  width: 100%;
+}
+
+.autotoc-label,
+.autotoc-toc-label {
+  display: none;
+}
+
+.autotoc-icon,
+.autotoc-dash,
+.autotoc-spinner {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.autotoc-hover-zone:hover .autotoc-label {
+  display: -webkit-box;
+}
+
+.autotoc-hover-zone:hover .autotoc-toc-label {
+  display: block;
+}
+
+.autotoc-hover-zone:hover .autotoc-icon,
+.autotoc-hover-zone:hover .autotoc-dash,
+.autotoc-hover-zone:hover .autotoc-spinner {
+  display: none;
+}
+
+.autotoc-label {
+  width: 100%;
+  font-weight: 600;
+  font-size: 16px;
+  color: #374151;
+  line-height: 1.35;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  max-height: calc(16px * 1.35 * 2 + 14px);
+  padding: 7px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.autotoc-label:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.autotoc-item.is-active .autotoc-label {
+  color: #111827;
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+.autotoc-toc-label {
+  width: 100%;
+  font-weight: 400;
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  max-height: calc(14px * 1.35 + 8px);
+  padding: 4px 12px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.autotoc-toc-label:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.autotoc-toc-item[data-level="1"] .autotoc-toc-label { padding-left: 12px; }
+.autotoc-toc-item[data-level="2"] .autotoc-toc-label { padding-left: 26px; }
+.autotoc-toc-item[data-level="3"] .autotoc-toc-label { padding-left: 40px; }
+.autotoc-toc-item[data-level="4"] .autotoc-toc-label { padding-left: 54px; }
+.autotoc-toc-item[data-level="5"] .autotoc-toc-label { padding-left: 68px; }
+.autotoc-toc-item[data-level="6"] .autotoc-toc-label { padding-left: 82px; }
+
+.autotoc-toc-item.is-active .autotoc-toc-label {
+  color: #374151;
+  font-weight: 500;
+}
+
+.autotoc-icon {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: rgba(156, 163, 175, 0.35);
+  margin: 6px auto;
+  transition: background-color 0.2s ease;
+  cursor: pointer;
+}
+
+.autotoc-item.is-active .autotoc-icon {
+  background-color: rgba(107, 114, 128, 0.8);
+}
+
+.autotoc-dash {
+  height: 3px;
+  border-radius: 2px;
+  background-color: rgba(156, 163, 175, 0.3);
+  margin: 3px auto;
+  transition: background-color 0.2s ease, width 0.2s ease;
+  cursor: pointer;
+}
+
+.autotoc-toc-item[data-level="1"] .autotoc-dash { width: 24px; }
+.autotoc-toc-item[data-level="2"] .autotoc-dash { width: 18px; }
+.autotoc-toc-item[data-level="3"] .autotoc-dash { width: 13px; }
+.autotoc-toc-item[data-level="4"] .autotoc-dash { width: 9px; }
+.autotoc-toc-item[data-level="5"] .autotoc-dash { width: 7px; }
+.autotoc-toc-item[data-level="6"] .autotoc-dash { width: 5px; }
+
+.autotoc-toc-item.is-active .autotoc-dash {
+  background-color: rgba(107, 114, 128, 0.8);
+}
+
+.autotoc-spinner {
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(156, 163, 175, 0.3);
+  border-top-color: rgba(107, 114, 128, 0.7);
+  border-radius: 50%;
+  animation: autotoc-spin 0.8s linear infinite;
+  margin: 6px auto;
+}
+
+@keyframes autotoc-spin {
+  to { transform: rotate(360deg); }
+}
