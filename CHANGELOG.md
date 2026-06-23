@@ -4,9 +4,9 @@ All notable changes to AutoToC will be documented in this file.
 
 ## [0.1.5] - 2026-06-23
 
-- Made long expanded ToC heading groups independently scrollable when they exceed 70% of the viewport height.
-- Reduced collapsed heading bars to an ordered sample for long ToC groups and disabled collapsed bar active highlighting in that mode.
-- Hid collapsed heading bars entirely when the full collapsed icon pattern would exceed 95% of the viewport height.
+- Hide collapsed heading bars when the collapsed icon list would exceed 90% of the viewport height.
+- Keep collapsed question dots visible when collapsed heading bars are hidden.
+- Set the expanded panel maximum height to 90% of the viewport and keep overflow scrolling on the panel only.
 
 ## [0.1.4] - 2026-06-23
 
