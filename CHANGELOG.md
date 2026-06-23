@@ -2,6 +2,11 @@
 
 All notable changes to AutoToC will be documented in this file.
 
+## [0.1.3] - 2026-06-23
+
+- Kept the collapsed icon column and expanded panel centered on the right edge of the viewport.
+- Recomputed the viewport center after rebuilds and window resizes to prevent the expanded panel from being clipped.
+
 ## [0.1.2] - 2026-06-23
 
 - Removed collapsed icon/text position synchronization by rendering the collapsed icon column separately from the expanded text panel.

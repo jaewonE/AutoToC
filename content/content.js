@@ -24,6 +24,7 @@
       intervals: [],
       timeouts: [],
       scrollHandler: null,
+      resizeHandler: null,
       currentUrl: window.location.href,
       initialized: false,
       rebuilding: false,
@@ -229,6 +230,12 @@
     state.root = root;
     state.collapsed = collapsed;
     state.panel = panel;
+    syncViewportCenter();
+  }
+
+  function syncViewportCenter() {
+    if (!state.root) return;
+    state.root.style.top = `${Math.round(window.innerHeight / 2)}px`;
   }
 
   function createCollapsedQuestionItem(qaBlock) {
@@ -328,6 +335,7 @@
     }
 
     renderActiveState();
+    syncViewportCenter();
   }
 
   function renderActiveState() {
@@ -417,6 +425,17 @@
 
     state.scrollContainer.addEventListener("scroll", state.scrollHandler, { passive: true });
     updateActiveFromScroll();
+  }
+
+  function setupViewportCenterTracking() {
+    if (state.resizeHandler) return;
+
+    state.resizeHandler = () => {
+      syncViewportCenter();
+    };
+
+    window.addEventListener("resize", state.resizeHandler, { passive: true });
+    syncViewportCenter();
   }
 
   function scrollToElement(element) {
@@ -511,6 +530,10 @@
       state.scrollContainer.removeEventListener("scroll", state.scrollHandler);
     }
 
+    if (state.resizeHandler) {
+      window.removeEventListener("resize", state.resizeHandler);
+    }
+
     state.root?.remove();
     resetState();
   }
@@ -535,6 +558,7 @@
     updateActiveFromScroll();
     renderUI();
     setupScrollTracking();
+    setupViewportCenterTracking();
 
     state.rebuilding = false;
   }
@@ -578,6 +602,7 @@
     updateActiveFromScroll();
     renderUI();
     setupScrollTracking();
+    setupViewportCenterTracking();
     setupMutationObserver();
     setupTemporaryBodyObserver();
   }

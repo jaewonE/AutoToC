@@ -9,7 +9,6 @@
 .autotoc-root {
   position: fixed;
   right: 0;
-  top: 50%;
   transform: translateY(-50%);
   z-index: 9999;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -48,7 +47,7 @@
 .autotoc-panel {
   position: absolute;
   right: 0;
-  top: 8px;
+  top: 50%;
   width: min(var(--autotoc-expanded-width), calc(100vw - var(--autotoc-viewport-gap)));
   min-height: 42px;
   max-height: 80vh;
@@ -60,7 +59,7 @@
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   border-radius: 8px;
   padding: 10px;
-  transform: translateX(12px);
+  transform: translateY(-50%) translateX(12px);
   transition:
     opacity 0.2s ease,
     transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -69,7 +68,7 @@
 .autotoc-hover-zone:hover .autotoc-panel {
   opacity: 1;
   pointer-events: auto;
-  transform: translateX(0);
+  transform: translateY(-50%) translateX(0);
 }
 
 .autotoc-panel::-webkit-scrollbar {
