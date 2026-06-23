@@ -1,22 +1,46 @@
 (() => {
   "use strict";
 
+  const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const GLOBAL_CLEANUP_KEY = "__autotocCleanup";
+  const ROOT_SELECTOR = ".autotoc-root";
+
+  if (typeof window[GLOBAL_CLEANUP_KEY] === "function") {
+    try {
+      window[GLOBAL_CLEANUP_KEY]();
+    } catch (error) {
+      console.warn("[AutoToC] Failed to cleanup previous instance", error);
+    }
+  }
+
   const SELECTORS = {
     userMessage: '[data-message-author-role="user"]',
     assistantMessage: '[data-message-author-role="assistant"]',
+    conversationTurn: '[data-testid^="conversation-turn-"]',
     markdownBody: ".markdown, .prose",
-    streamingIndicator: 'button[aria-label="Stop generating"], .result-streaming',
+    streamingIndicator: 'button[aria-label="Stop generating"], [data-testid="stop-button"], .result-streaming',
+    streamingResult: ".result-streaming",
     codeBlock: "pre, code"
   };
 
   const COLLAPSED_ITEM_HEIGHT = 20;
   const COLLAPSED_HEIGHT_LIMIT_RATIO = 0.8;
+  const QA_ACTIVATION_OFFSET_PX = 88;
+  const QUESTION_SCROLL_MARGIN_PX = 88;
+  const COLLAPSED_HEADING_MIN_SCROLL_GAP = 48;
+  const NATIVE_MINIMAP_MIN_BARS = 5;
+  const NATIVE_MINIMAP_HIDDEN_ATTR = "data-autotoc-hidden-native-minimap";
+  const NATIVE_MINIMAP_SCAN_DELAY_MS = 120;
+  const DEBUG_STORAGE_KEY = "autotocDebug";
+  const DEBUG_DEFAULT_ENABLED = true;
 
   function createDefaultState() {
     return {
       conversationId: null,
       qaBlocks: [],
+      qaCache: new Map(),
       activeQAIndex: -1,
+      activeQAKey: null,
       activeHeadingIndex: -1,
       scrollContainer: null,
       conversationContainer: null,
@@ -24,6 +48,8 @@
       collapsed: null,
       panel: null,
       observers: [],
+      mutationObserver: null,
+      mutationObserverTarget: null,
       intervals: [],
       timeouts: [],
       scrollHandler: null,
@@ -31,7 +57,13 @@
       currentUrl: window.location.href,
       initialized: false,
       rebuilding: false,
-      renderTimeout: null
+      renderTimeout: null,
+      nativeMinimapObserver: null,
+      nativeMinimapScanTimeout: null,
+      hiddenNativeMinimapElements: new Set(),
+      nextFallbackOrder: 0,
+      lastDebugActiveSignature: null,
+      lastDebugRenderSignature: null
     };
   }
 
@@ -39,7 +71,15 @@
   let navigationPatched = false;
   let bootTimeout = null;
   let navigationPollId = null;
+  let navigationHandler = null;
   let initializationRunId = 0;
+
+  function removeForeignRoots() {
+    for (const root of document.querySelectorAll(ROOT_SELECTOR)) {
+      if (root === state.root) continue;
+      root.remove();
+    }
+  }
 
   function resetState() {
     Object.assign(state, createDefaultState());
@@ -73,11 +113,65 @@
     };
   }
 
+  function isDebugEnabled() {
+    try {
+      const value = window.localStorage?.getItem(DEBUG_STORAGE_KEY);
+      if (value === "0" || value === "false") return false;
+      if (value === "1" || value === "true") return true;
+    } catch (error) {
+      return DEBUG_DEFAULT_ENABLED;
+    }
+
+    return DEBUG_DEFAULT_ENABLED;
+  }
+
+  function debugLog(label, payload = {}) {
+    if (!isDebugEnabled()) return;
+    console.log(`[AutoToC] ${label}`, payload);
+  }
+
+  function debugTable(label, rows) {
+    if (!isDebugEnabled()) return;
+    console.log(`[AutoToC] ${label}`);
+    console.table(rows);
+  }
+
+  function getScrollTop(scrollContainer = state.scrollContainer) {
+    if (!scrollContainer) return 0;
+    if (scrollContainer === document.documentElement || scrollContainer === document.body) {
+      return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+    }
+    return scrollContainer.scrollTop;
+  }
+
+  function scrollToY(y) {
+    if (!Number.isFinite(y)) return;
+
+    if (
+      state.scrollContainer === document.documentElement ||
+      state.scrollContainer === document.body ||
+      state.scrollContainer === document.scrollingElement
+    ) {
+      window.scrollTo({ top: y, behavior: "smooth" });
+      return;
+    }
+
+    state.scrollContainer?.scrollTo?.({ top: y, behavior: "smooth" });
+  }
+
   function getElementTopRelativeToScrollContainer(element, scrollContainer) {
     if (!element || !scrollContainer) return 0;
     const elementRect = element.getBoundingClientRect();
+    if (
+      scrollContainer === document.documentElement ||
+      scrollContainer === document.body ||
+      scrollContainer === document.scrollingElement
+    ) {
+      return elementRect.top + getScrollTop(scrollContainer);
+    }
+
     const containerRect = scrollContainer.getBoundingClientRect();
-    return elementRect.top - containerRect.top + scrollContainer.scrollTop;
+    return elementRect.top - containerRect.top + getScrollTop(scrollContainer);
   }
 
   function discoverScrollContainer() {
@@ -97,25 +191,37 @@
     return document.scrollingElement || document.documentElement;
   }
 
-  function findConversationContainer(userMessages) {
-    if (!userMessages.length) {
-      return document.querySelector("main") || document.body;
-    }
+  function findCommonAncestor(elements) {
+    if (!elements.length) return null;
 
-    let candidate = userMessages[0].parentElement;
-    while (candidate && candidate !== document.body) {
-      const count = candidate.querySelectorAll(SELECTORS.userMessage).length;
-      if (count === userMessages.length) {
-        const nextParent = candidate.parentElement;
-        const parentCount = nextParent?.querySelectorAll?.(SELECTORS.userMessage).length || 0;
-        if (parentCount !== userMessages.length) {
-          return candidate;
-        }
+    let candidate = elements[0];
+    while (candidate && candidate !== document.documentElement) {
+      if (elements.every((element) => candidate.contains(element))) {
+        return candidate;
       }
       candidate = candidate.parentElement;
     }
 
-    return userMessages[0].parentElement || document.body;
+    return null;
+  }
+
+  function findConversationContainer(userMessages) {
+    const main = document.querySelector("main");
+    if (main && (!userMessages.length || userMessages.every((element) => main.contains(element)))) {
+      return main;
+    }
+
+    if (userMessages.length <= 1) {
+      return document.body || document.documentElement;
+    }
+
+    const commonAncestor = findCommonAncestor(userMessages);
+    return commonAncestor || document.body || document.documentElement;
+  }
+
+  function getMessageSearchRoot() {
+    const main = document.querySelector("main");
+    return main || document.body || document.documentElement;
   }
 
   function isInsideCodeBlock(headingElement) {
@@ -131,8 +237,102 @@
     return normalizeText(userMessageElement?.textContent, 240) || "Question";
   }
 
+  function hashString(value) {
+    let hash = 0;
+    for (let index = 0; index < value.length; index += 1) {
+      hash = ((hash << 5) - hash) + value.charCodeAt(index);
+      hash |= 0;
+    }
+    return Math.abs(hash).toString(36);
+  }
+
+  function getTurnNumber(element) {
+    const turnElement = element?.closest?.(SELECTORS.conversationTurn);
+    const testId = turnElement?.getAttribute?.("data-testid") || "";
+    const match = testId.match(/conversation-turn-(\d+)/);
+    return match ? Number(match[1]) : null;
+  }
+
+  function getQuestionKey(questionElement) {
+    const turnNumber = getTurnNumber(questionElement);
+    if (Number.isFinite(turnNumber)) return `turn:${turnNumber}`;
+
+    const messageIdElement = questionElement?.closest?.("[data-message-id]");
+    const messageId = messageIdElement?.getAttribute?.("data-message-id");
+    if (messageId) return `message:${messageId}`;
+
+    return `text:${hashString(getQuestionText(questionElement))}`;
+  }
+
+  function getQuestionOrder(questionElement, key) {
+    const turnNumber = getTurnNumber(questionElement);
+    if (Number.isFinite(turnNumber)) return turnNumber;
+
+    const cachedBlock = state.qaCache.get(key);
+    if (cachedBlock) return cachedBlock.order;
+
+    state.nextFallbackOrder += 1;
+    return state.nextFallbackOrder;
+  }
+
+  function summarizeBlock(qaBlock) {
+    return {
+      key: qaBlock.key,
+      order: qaBlock.order,
+      mounted: qaBlock.isMounted,
+      startY: Math.round(qaBlock.startY),
+      headings: qaBlock.headings.length,
+      question: normalizeText(qaBlock.questionText, 80)
+    };
+  }
+
+  function debugActiveState(referenceY, qaReferenceY, activeBlock) {
+    const signature = [
+      Math.round(referenceY),
+      Math.round(qaReferenceY),
+      state.activeQAKey || "none",
+      state.activeHeadingIndex
+    ].join(":");
+
+    if (signature === state.lastDebugActiveSignature) return;
+    state.lastDebugActiveSignature = signature;
+
+    debugLog("active state", {
+      referenceY: Math.round(referenceY),
+      qaReferenceY: Math.round(qaReferenceY),
+      qaActivationOffset: QA_ACTIVATION_OFFSET_PX,
+      activeQAKey: state.activeQAKey,
+      activeQAIndex: state.activeQAIndex,
+      activeHeadingIndex: state.activeHeadingIndex,
+      activeQuestion: activeBlock ? normalizeText(activeBlock.questionText, 100) : null,
+      activeHeadings: activeBlock?.headings.length || 0,
+      mounted: activeBlock?.isMounted || false
+    });
+  }
+
+  function debugRenderState() {
+    const activeBlock = state.qaBlocks.find((qaBlock) => qaBlock.key === state.activeQAKey);
+    const signature = [
+      state.qaBlocks.length,
+      state.activeQAKey || "none",
+      activeBlock?.headings.length || 0
+    ].join(":");
+
+    if (signature === state.lastDebugRenderSignature) return;
+    state.lastDebugRenderSignature = signature;
+
+    debugLog("render", {
+      renderedQuestions: state.qaBlocks.length,
+      mountedQuestions: state.qaBlocks.filter((qaBlock) => qaBlock.isMounted).length,
+      activeQAKey: state.activeQAKey,
+      activeQuestion: activeBlock ? normalizeText(activeBlock.questionText, 100) : null,
+      activeHeadings: activeBlock?.headings.length || 0,
+      activeMounted: activeBlock?.isMounted || false
+    });
+  }
+
   function collectAnswerElementsBetween(currentQuestion, nextQuestion) {
-    return Array.from(document.querySelectorAll(SELECTORS.assistantMessage)).filter((answerElement) => {
+    return Array.from(getMessageSearchRoot().querySelectorAll(SELECTORS.assistantMessage)).filter((answerElement) => {
       const followsQuestion = Boolean(
         currentQuestion.compareDocumentPosition(answerElement) & Node.DOCUMENT_POSITION_FOLLOWING
       );
@@ -163,7 +363,8 @@
           headings.push({
             level: Number(headingElement.tagName.slice(1)),
             text,
-            element: headingElement
+            element: headingElement,
+            y: getElementTopRelativeToScrollContainer(headingElement, state.scrollContainer)
           });
         }
       }
@@ -172,33 +373,113 @@
     return headings;
   }
 
+  function sanitizeCachedBlock(qaBlock) {
+    if (qaBlock.questionElement && !qaBlock.questionElement.isConnected) {
+      qaBlock.questionElement = null;
+    }
+
+    qaBlock.answerElements = (qaBlock.answerElements || []).filter((element) => element.isConnected);
+    qaBlock.headings = (qaBlock.headings || []).map((heading) => ({
+      ...heading,
+      element: heading.element?.isConnected ? heading.element : null
+    }));
+  }
+
+  function sortQABlocks(left, right) {
+    if (left.order !== right.order) return left.order - right.order;
+    return left.startY - right.startY;
+  }
+
+  function refreshQABlocksFromCache() {
+    state.qaBlocks = Array.from(state.qaCache.values())
+      .map((qaBlock) => {
+        sanitizeCachedBlock(qaBlock);
+        return qaBlock;
+      })
+      .sort(sortQABlocks)
+      .map((qaBlock, index) => ({
+        ...qaBlock,
+        index
+      }));
+  }
+
+  function pruneCachedBlocksAfter(order, keepKey, reason) {
+    const removed = [];
+
+    for (const [key, qaBlock] of state.qaCache.entries()) {
+      if (key !== keepKey && qaBlock.order > order) {
+        removed.push(summarizeBlock(qaBlock));
+        state.qaCache.delete(key);
+      }
+    }
+
+    if (!removed.length) return false;
+
+    debugLog("pruned cached branch tail", {
+      reason,
+      afterOrder: order,
+      removed
+    });
+    refreshQABlocksFromCache();
+    return true;
+  }
+
   function parseQABlocks() {
-    const userMessages = Array.from(document.querySelectorAll(SELECTORS.userMessage));
+    const userMessages = Array.from(getMessageSearchRoot().querySelectorAll(SELECTORS.userMessage));
+    const seenKeys = new Set();
     state.scrollContainer = discoverScrollContainer();
     state.conversationContainer = findConversationContainer(userMessages);
 
-    state.qaBlocks = userMessages.map((questionElement, index) => {
-      const nextQuestion = userMessages[index + 1] || null;
+    for (const [visibleIndex, questionElement] of userMessages.entries()) {
+      const nextQuestion = userMessages[visibleIndex + 1] || null;
+      const key = getQuestionKey(questionElement);
+      const cachedBlock = state.qaCache.get(key);
       const answerElements = collectAnswerElementsBetween(questionElement, nextQuestion);
+      const headings = extractHeadingsFromAnswers(answerElements);
       const startY = getElementTopRelativeToScrollContainer(questionElement, state.scrollContainer);
       const endY = nextQuestion
         ? getElementTopRelativeToScrollContainer(nextQuestion, state.scrollContainer)
         : state.scrollContainer.scrollHeight;
+      const cachedHeadings = cachedBlock?.headings || [];
+      const shouldUseFreshHeadings = answerElements.length > 0 || headings.length > 0 || !cachedBlock;
 
-      return {
-        index,
+      seenKeys.add(key);
+      state.qaCache.set(key, {
+        key,
+        order: getQuestionOrder(questionElement, key),
         questionElement,
         questionText: getQuestionText(questionElement),
         answerElements,
-        headings: extractHeadingsFromAnswers(answerElements),
+        headings: shouldUseFreshHeadings ? headings : cachedHeadings,
         startY,
         endY,
+        isMounted: true,
         isStreaming: false,
-        pollingInterval: null
-      };
-    });
+        pollingInterval: null,
+        lastSeenAt: Date.now()
+      });
+    }
 
+    for (const [key, qaBlock] of state.qaCache.entries()) {
+      if (seenKeys.has(key)) continue;
+      qaBlock.isMounted = false;
+      qaBlock.isStreaming = false;
+      qaBlock.pollingInterval = null;
+      qaBlock.questionElement = qaBlock.questionElement?.isConnected ? qaBlock.questionElement : null;
+      qaBlock.answerElements = [];
+      sanitizeCachedBlock(qaBlock);
+    }
+
+    refreshQABlocksFromCache();
     markStreamingBlock();
+
+    debugTable("parseQABlocks", state.qaBlocks.map(summarizeBlock));
+    debugLog("parse summary", {
+      visibleQuestions: userMessages.length,
+      cachedQuestions: state.qaBlocks.length,
+      scrollTop: Math.round(getScrollTop()),
+      scrollContainer: state.scrollContainer?.tagName || "unknown"
+    });
   }
 
   function filterHeadings(headings) {
@@ -208,17 +489,57 @@
     return headings.filter((heading) => heading.level <= 4);
   }
 
-  function shouldRenderCollapsedHeadings(headingCount) {
+  function hasTightHeadingSpacing(headings) {
+    const headingPositions = headings
+      .map((heading) => Math.round(heading.y))
+      .filter((position) => Number.isFinite(position))
+      .sort((left, right) => left - right);
+
+    for (let index = 1; index < headingPositions.length; index += 1) {
+      if (headingPositions[index] - headingPositions[index - 1] < COLLAPSED_HEADING_MIN_SCROLL_GAP) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function getCollapsedHeadingMode(headings) {
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const collapsedItemCount = state.qaBlocks.length + headingCount;
-    return collapsedItemCount * COLLAPSED_ITEM_HEIGHT <= viewportHeight * COLLAPSED_HEIGHT_LIMIT_RATIO;
+    const collapsedItemCount = state.qaBlocks.length + headings.length;
+    const fitsViewport = collapsedItemCount * COLLAPSED_ITEM_HEIGHT <= viewportHeight * COLLAPSED_HEIGHT_LIMIT_RATIO;
+    if (!fitsViewport) {
+      debugLog("collapsed headings summarized", {
+        reason: "height limit",
+        collapsedItemCount,
+        viewportHeight,
+        limitRatio: COLLAPSED_HEIGHT_LIMIT_RATIO
+      });
+      return "summary";
+    }
+
+    if (hasTightHeadingSpacing(headings)) {
+      debugLog("collapsed headings summarized", {
+        reason: "tight heading spacing",
+        minGap: COLLAPSED_HEADING_MIN_SCROLL_GAP,
+        headings: headings.map((heading) => ({
+          text: normalizeText(heading.text, 80),
+          y: Math.round(heading.y)
+        }))
+      });
+      return "summary";
+    }
+
+    return "detailed";
   }
 
   function ensureRoot() {
+    removeForeignRoots();
     if (state.root?.isConnected && state.collapsed?.isConnected && state.panel?.isConnected) return;
 
     const root = document.createElement("div");
     root.className = "autotoc-root is-empty";
+    root.dataset.autotocInstance = INSTANCE_ID;
 
     const hoverZone = document.createElement("div");
     hoverZone.className = "autotoc-hover-zone";
@@ -247,15 +568,204 @@
     state.root.style.top = `${Math.round(window.innerHeight / 2)}px`;
   }
 
+  function isAutoToCElement(element) {
+    return Boolean(element?.closest?.(ROOT_SELECTOR));
+  }
+
+  function isElementVisiblyRendered(element, rect = element.getBoundingClientRect()) {
+    if (!element || !rect.width || !rect.height) return false;
+
+    const style = window.getComputedStyle(element);
+    return (
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      style.opacity !== "0" &&
+      rect.bottom > 0 &&
+      rect.right > 0 &&
+      rect.top < (window.innerHeight || document.documentElement.clientHeight || 0) &&
+      rect.left < (window.innerWidth || document.documentElement.clientWidth || 0)
+    );
+  }
+
+  function isRightRailOverlayCandidate(element, rect) {
+    if (!(element instanceof HTMLElement)) return false;
+    if (element === document.body || element === document.documentElement) return false;
+    if (isAutoToCElement(element)) return false;
+    if (element.hasAttribute(NATIVE_MINIMAP_HIDDEN_ATTR)) return false;
+    if (!isElementVisiblyRendered(element, rect)) return false;
+
+    const style = window.getComputedStyle(element);
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const isOverlayPosition = style.position === "fixed" || style.position === "sticky" || style.position === "absolute";
+    const nearRightEdge = rect.right >= viewportWidth - 8 || rect.left >= viewportWidth - 180;
+    const narrowEnough = rect.width >= 8 && rect.width <= 180;
+    const overlapsViewportMiddle = rect.top < viewportHeight * 0.9 && rect.bottom > viewportHeight * 0.1;
+    const text = normalizeText(element.textContent, 80);
+
+    return isOverlayPosition && nearRightEdge && narrowEnough && overlapsViewportMiddle && text.length <= 12;
+  }
+
+  function isNativeMinimapBarElement(element) {
+    if (!(element instanceof HTMLElement)) return false;
+    if (isAutoToCElement(element)) return false;
+    if (element.querySelector("svg, img, input, textarea, select")) return false;
+
+    const rect = element.getBoundingClientRect();
+    if (!isElementVisiblyRendered(element, rect)) return false;
+    if (normalizeText(element.textContent, 20)) return false;
+
+    const horizontalBar = (
+      rect.width >= 4 &&
+      rect.width <= 120 &&
+      rect.height >= 2 &&
+      rect.height <= 18 &&
+      rect.width >= rect.height * 1.35
+    );
+    const verticalBar = (
+      rect.width >= 2 &&
+      rect.width <= 16 &&
+      rect.height >= 8 &&
+      rect.height <= 90 &&
+      rect.height >= rect.width * 1.35
+    );
+
+    return horizontalBar || verticalBar;
+  }
+
+  function getElementDescriptor(element) {
+    return {
+      tagName: element.tagName,
+      id: element.id || null,
+      className: typeof element.className === "string" ? element.className : null,
+      role: element.getAttribute("role"),
+      testId: element.getAttribute("data-testid"),
+      ariaLabel: element.getAttribute("aria-label")
+    };
+  }
+
+  function collectNativeMinimapCandidates() {
+    const candidates = [];
+    const elements = Array.from(document.body?.querySelectorAll("aside, nav, ol, ul, section, div") || []);
+
+    for (const element of elements) {
+      const rect = element.getBoundingClientRect();
+      if (!isRightRailOverlayCandidate(element, rect)) continue;
+
+      const bars = Array.from(element.querySelectorAll("*")).filter(isNativeMinimapBarElement);
+      if (bars.length < NATIVE_MINIMAP_MIN_BARS) continue;
+
+      const distinctYPositions = new Set(
+        bars.map((bar) => Math.round(bar.getBoundingClientRect().top / 4))
+      );
+      if (distinctYPositions.size < NATIVE_MINIMAP_MIN_BARS) continue;
+
+      candidates.push({
+        element,
+        barCount: bars.length,
+        area: rect.width * rect.height,
+        rect
+      });
+    }
+
+    candidates.sort((left, right) => left.area - right.area);
+    return candidates;
+  }
+
+  function suppressNativeRightRailMinimap() {
+    if (!document.body) return;
+
+    const selectedCandidates = [];
+    for (const candidate of collectNativeMinimapCandidates()) {
+      const overlapsSelected = selectedCandidates.some((selected) => (
+        selected.element.contains(candidate.element) || candidate.element.contains(selected.element)
+      ));
+      if (!overlapsSelected) {
+        selectedCandidates.push(candidate);
+      }
+    }
+
+    if (!selectedCandidates.length) return;
+
+    for (const candidate of selectedCandidates) {
+      candidate.element.setAttribute(NATIVE_MINIMAP_HIDDEN_ATTR, INSTANCE_ID);
+      candidate.element.style.setProperty("display", "none", "important");
+      candidate.element.style.setProperty("visibility", "hidden", "important");
+      candidate.element.style.setProperty("pointer-events", "none", "important");
+      state.hiddenNativeMinimapElements.add(candidate.element);
+    }
+
+    debugLog("native right rail minimap suppressed", {
+      hiddenCount: selectedCandidates.length,
+      minBars: NATIVE_MINIMAP_MIN_BARS,
+      candidates: selectedCandidates.map((candidate) => ({
+        ...getElementDescriptor(candidate.element),
+        barCount: candidate.barCount,
+        rect: {
+          top: Math.round(candidate.rect.top),
+          right: Math.round(candidate.rect.right),
+          bottom: Math.round(candidate.rect.bottom),
+          left: Math.round(candidate.rect.left),
+          width: Math.round(candidate.rect.width),
+          height: Math.round(candidate.rect.height)
+        }
+      }))
+    });
+  }
+
+  function scheduleNativeMinimapSuppression() {
+    if (state.nativeMinimapScanTimeout !== null) {
+      clearTimeout(state.nativeMinimapScanTimeout);
+    }
+
+    state.nativeMinimapScanTimeout = rememberTimeout(window.setTimeout(() => {
+      state.nativeMinimapScanTimeout = null;
+      suppressNativeRightRailMinimap();
+    }, NATIVE_MINIMAP_SCAN_DELAY_MS));
+  }
+
+  function setupNativeMinimapSuppression() {
+    if (state.nativeMinimapObserver || !document.body) return;
+
+    const observer = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => mutation.type === "childList")) {
+        scheduleNativeMinimapSuppression();
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
+    state.nativeMinimapObserver = observer;
+    state.observers.push(observer);
+    scheduleNativeMinimapSuppression();
+  }
+
+  function restoreHiddenNativeMinimapElements() {
+    for (const element of state.hiddenNativeMinimapElements) {
+      if (!element.isConnected) continue;
+      if (element.getAttribute(NATIVE_MINIMAP_HIDDEN_ATTR) !== INSTANCE_ID) continue;
+
+      element.removeAttribute(NATIVE_MINIMAP_HIDDEN_ATTR);
+      element.style.removeProperty("display");
+      element.style.removeProperty("visibility");
+      element.style.removeProperty("pointer-events");
+    }
+
+    state.hiddenNativeMinimapElements.clear();
+  }
+
   function createCollapsedQuestionItem(qaBlock) {
     const item = document.createElement("div");
     item.className = "autotoc-item";
-    item.dataset.qa = String(qaBlock.index);
+    item.dataset.qaKey = qaBlock.key;
 
     const icon = document.createElement("div");
     icon.className = qaBlock.isStreaming ? "autotoc-spinner" : "autotoc-icon";
 
-    item.addEventListener("click", () => scrollToElement(qaBlock.questionElement));
+    item.addEventListener("click", () => scrollToBlock(qaBlock));
     item.append(icon);
     return item;
   }
@@ -263,15 +773,23 @@
   function createPanelQuestionItem(qaBlock) {
     const item = document.createElement("div");
     item.className = "autotoc-item";
-    item.dataset.qa = String(qaBlock.index);
+    item.dataset.qaKey = qaBlock.key;
 
     const label = document.createElement("div");
     label.className = "autotoc-label";
     label.textContent = qaBlock.questionText;
     label.title = qaBlock.questionText;
 
-    item.addEventListener("click", () => scrollToElement(qaBlock.questionElement));
+    item.addEventListener("click", () => scrollToBlock(qaBlock));
     item.append(label);
+
+    if (qaBlock.isStreaming) {
+      const spinner = document.createElement("div");
+      spinner.className = "autotoc-spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      item.append(spinner);
+    }
+
     return item;
   }
 
@@ -286,10 +804,34 @@
 
     item.addEventListener("click", (event) => {
       event.stopPropagation();
-      scrollToElement(heading.element);
+      scrollToHeading(heading);
     });
 
     item.append(dash);
+    return item;
+  }
+
+  function createCollapsedHeadingSummaryItem(headings) {
+    const item = document.createElement("div");
+    item.className = "autotoc-toc-summary-item";
+    item.title = "Show current answer table of contents";
+
+    const icon = document.createElement("div");
+    icon.className = "autotoc-list-icon";
+    icon.setAttribute("aria-hidden", "true");
+
+    for (let index = 0; index < 3; index += 1) {
+      const bar = document.createElement("div");
+      bar.className = "autotoc-list-icon-bar";
+      icon.append(bar);
+    }
+
+    item.addEventListener("click", (event) => {
+      event.stopPropagation();
+      scrollToHeading(headings[0]);
+    });
+
+    item.append(icon);
     return item;
   }
 
@@ -306,7 +848,7 @@
 
     item.addEventListener("click", (event) => {
       event.stopPropagation();
-      scrollToElement(heading.element);
+      scrollToHeading(heading);
     });
 
     item.append(label);
@@ -318,31 +860,34 @@
     state.collapsed.replaceChildren();
     state.panel.replaceChildren();
     state.root.classList.toggle("is-empty", state.qaBlocks.length === 0);
+    debugRenderState();
 
     for (const qaBlock of state.qaBlocks) {
       state.collapsed.append(createCollapsedQuestionItem(qaBlock));
       state.panel.append(createPanelQuestionItem(qaBlock));
 
-      if (qaBlock.index === state.activeQAIndex && !qaBlock.isStreaming) {
+      if (qaBlock.key === state.activeQAKey && !qaBlock.isStreaming) {
         const filteredHeadings = filterHeadings(qaBlock.headings);
         if (filteredHeadings.length) {
           const collapsedTocGroup = document.createElement("div");
           collapsedTocGroup.className = "autotoc-toc-group";
           const panelTocGroup = document.createElement("div");
           panelTocGroup.className = "autotoc-toc-group";
-          const renderCollapsedHeadings = shouldRenderCollapsedHeadings(filteredHeadings.length);
+          const collapsedHeadingMode = getCollapsedHeadingMode(filteredHeadings);
+
+          if (collapsedHeadingMode === "summary") {
+            collapsedTocGroup.append(createCollapsedHeadingSummaryItem(filteredHeadings));
+          }
 
           for (const heading of filteredHeadings) {
             const originalIndex = qaBlock.headings.indexOf(heading);
-            if (renderCollapsedHeadings) {
+            if (collapsedHeadingMode === "detailed") {
               collapsedTocGroup.append(createCollapsedHeadingItem(heading, originalIndex));
             }
             panelTocGroup.append(createPanelHeadingItem(heading, originalIndex));
           }
 
-          if (renderCollapsedHeadings) {
-            state.collapsed.append(collapsedTocGroup);
-          }
+          state.collapsed.append(collapsedTocGroup);
           state.panel.append(panelTocGroup);
         }
       }
@@ -350,17 +895,21 @@
 
     renderActiveState();
     syncViewportCenter();
+    suppressNativeRightRailMinimap();
   }
 
   function renderActiveState() {
+    removeForeignRoots();
     if (!state.root) return;
 
     for (const element of state.root.querySelectorAll(".is-active")) {
       element.classList.remove("is-active");
     }
 
-    for (const activeQAItem of state.root.querySelectorAll(`.autotoc-item[data-qa="${state.activeQAIndex}"]`)) {
-      activeQAItem.classList.add("is-active");
+    for (const activeQAItem of state.root.querySelectorAll(".autotoc-item")) {
+      if (activeQAItem.dataset.qaKey === state.activeQAKey) {
+        activeQAItem.classList.add("is-active");
+      }
     }
 
     if (state.activeHeadingIndex >= 0) {
@@ -384,31 +933,48 @@
   function updateActiveFromScroll() {
     if (!state.scrollContainer || !state.qaBlocks.length) {
       state.activeQAIndex = -1;
+      state.activeQAKey = null;
       state.activeHeadingIndex = -1;
       renderActiveState();
       return;
     }
 
-    const referenceY = state.scrollContainer.scrollTop + (state.scrollContainer.clientHeight * 2 / 3);
+    const referenceY = getScrollTop();
+    const qaReferenceY = referenceY + QA_ACTIVATION_OFFSET_PX;
     const previousQAIndex = state.activeQAIndex;
+    const previousQAKey = state.activeQAKey;
     const previousHeadingIndex = state.activeHeadingIndex;
     let nextQAIndex = -1;
+    let nextQAKey = null;
 
     for (let index = state.qaBlocks.length - 1; index >= 0; index -= 1) {
-      if (referenceY >= state.qaBlocks[index].startY) {
+      if (qaReferenceY >= state.qaBlocks[index].startY - 1) {
         nextQAIndex = state.qaBlocks[index].index;
+        nextQAKey = state.qaBlocks[index].key;
         break;
       }
     }
 
+    if (nextQAKey === null && state.qaBlocks.length) {
+      const firstBlock = state.qaBlocks[0];
+      if (referenceY <= firstBlock.startY) {
+        nextQAIndex = firstBlock.index;
+        nextQAKey = firstBlock.key;
+      }
+    }
+
     state.activeQAIndex = nextQAIndex;
-    const activeBlock = state.qaBlocks[nextQAIndex];
+    state.activeQAKey = nextQAKey;
+    const activeBlock = state.qaBlocks.find((qaBlock) => qaBlock.key === nextQAKey);
     let nextHeadingIndex = -1;
 
     if (activeBlock) {
       for (let index = activeBlock.headings.length - 1; index >= 0; index -= 1) {
-        const headingY = getElementTopRelativeToScrollContainer(activeBlock.headings[index].element, state.scrollContainer);
-        if (referenceY >= headingY) {
+        const heading = activeBlock.headings[index];
+        const headingY = heading.element
+          ? getElementTopRelativeToScrollContainer(heading.element, state.scrollContainer)
+          : heading.y;
+        if (referenceY >= headingY - 1) {
           nextHeadingIndex = index;
           break;
         }
@@ -416,8 +982,9 @@
     }
 
     state.activeHeadingIndex = nextHeadingIndex;
+    debugActiveState(referenceY, qaReferenceY, activeBlock);
 
-    if (previousQAIndex !== state.activeQAIndex) {
+    if (previousQAKey !== state.activeQAKey || previousQAIndex !== state.activeQAIndex) {
       scheduleActiveQARender();
     } else if (previousHeadingIndex !== state.activeHeadingIndex) {
       renderActiveState();
@@ -452,31 +1019,123 @@
     syncViewportCenter();
   }
 
-  function scrollToElement(element) {
-    element?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  function scrollToElementOrY(element, y, debugContext) {
+    if (element?.isConnected) {
+      debugLog("scroll to element", debugContext);
+      element.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    debugLog("scroll to cached y", {
+      ...debugContext,
+      y: Math.round(y)
+    });
+    scrollToY(y);
+  }
+
+  function activateBlock(qaBlock, headingIndex = -1, reason = "manual activation") {
+    state.activeQAIndex = qaBlock.index;
+    state.activeQAKey = qaBlock.key;
+    state.activeHeadingIndex = headingIndex;
+    debugLog("manual active state", {
+      reason,
+      activeQAKey: state.activeQAKey,
+      activeQAIndex: state.activeQAIndex,
+      activeHeadingIndex: state.activeHeadingIndex,
+      question: normalizeText(qaBlock.questionText, 100)
+    });
+    renderUI();
+  }
+
+  function scrollToBlock(qaBlock) {
+    const blockY = qaBlock.questionElement?.isConnected
+      ? getElementTopRelativeToScrollContainer(qaBlock.questionElement, state.scrollContainer)
+      : qaBlock.startY;
+    const targetY = Math.max(0, blockY - QUESTION_SCROLL_MARGIN_PX);
+    activateBlock(qaBlock, -1, "question click");
+    debugLog("scroll to question anchor", {
+      type: "question",
+      key: qaBlock.key,
+      order: qaBlock.order,
+      question: normalizeText(qaBlock.questionText, 100),
+      mounted: qaBlock.isMounted,
+      blockY: Math.round(blockY),
+      targetY: Math.round(targetY),
+      qaActivationOffset: QA_ACTIVATION_OFFSET_PX,
+      scrollMargin: QUESTION_SCROLL_MARGIN_PX
+    });
+    scrollToY(targetY);
+  }
+
+  function scrollToHeading(heading) {
+    scrollToElementOrY(heading.element, heading.y, {
+      type: "heading",
+      level: heading.level,
+      heading: normalizeText(heading.text, 100),
+      mounted: Boolean(heading.element?.isConnected)
+    });
+  }
+
+  function hasStreamingIndicator() {
+    return Boolean(document.querySelector(SELECTORS.streamingIndicator));
+  }
+
+  function findBlockForAnswer(answerElement) {
+    if (!answerElement) return null;
+
+    const directBlock = state.qaBlocks.find((qaBlock) => (
+      qaBlock.answerElements.some((element) => element === answerElement || element.contains(answerElement))
+    ));
+    if (directBlock) return directBlock;
+
+    for (let index = state.qaBlocks.length - 1; index >= 0; index -= 1) {
+      const questionElement = state.qaBlocks[index].questionElement;
+      if (!questionElement) continue;
+      const followsQuestion = Boolean(
+        questionElement.compareDocumentPosition(answerElement) & Node.DOCUMENT_POSITION_FOLLOWING
+      );
+      if (followsQuestion) return state.qaBlocks[index];
+    }
+
+    return null;
+  }
+
+  function findStreamingBlock() {
+    const streamingElement = document.querySelector(SELECTORS.streamingResult);
+    const streamingAnswer = streamingElement?.closest?.(SELECTORS.assistantMessage) || streamingElement;
+    const streamingBlock = findBlockForAnswer(streamingAnswer);
+    if (streamingBlock) return streamingBlock;
+
+    return hasStreamingIndicator() ? state.qaBlocks[state.qaBlocks.length - 1] : null;
   }
 
   function markStreamingBlock() {
-    const isStreaming = Boolean(document.querySelector(SELECTORS.streamingIndicator));
-    if (!isStreaming || !state.qaBlocks.length) return;
+    if (!state.qaBlocks.length) return;
 
-    const streamingBlock = state.qaBlocks[state.qaBlocks.length - 1];
-    streamingBlock.isStreaming = true;
-    streamingBlock.headings = [];
-    startStreamingPoll(streamingBlock.index);
+    const streamingBlock = findStreamingBlock();
+    if (!streamingBlock) return;
+
+    pruneCachedBlocksAfter(streamingBlock.order, streamingBlock.key, "streaming block became tail");
+    const currentStreamingBlock = state.qaBlocks.find((qaBlock) => qaBlock.key === streamingBlock.key) || streamingBlock;
+
+    currentStreamingBlock.isStreaming = true;
+    currentStreamingBlock.headings = [];
+    startStreamingPoll(currentStreamingBlock.key);
+    debugLog("streaming block", summarizeBlock(currentStreamingBlock));
   }
 
-  function startStreamingPoll(qaIndex) {
-    const qaBlock = state.qaBlocks[qaIndex];
+  function startStreamingPoll(qaKey) {
+    const qaBlock = state.qaCache.get(qaKey);
     if (!qaBlock || qaBlock.pollingInterval !== null) return;
 
     const pollId = rememberInterval(window.setInterval(() => {
-      const isStillStreaming = Boolean(document.querySelector(SELECTORS.streamingIndicator));
+      const isStillStreaming = hasStreamingIndicator();
       if (isStillStreaming) return;
 
       clearInterval(pollId);
       qaBlock.pollingInterval = null;
       qaBlock.isStreaming = false;
+      debugLog("streaming complete", { qaKey });
       rebuild();
     }, 800));
 
@@ -489,8 +1148,23 @@
 
   function setupMutationObserver() {
     const target = state.conversationContainer || document.querySelector("main") || document.body;
+    if (state.mutationObserver && state.mutationObserverTarget === target) return;
+
+    if (state.mutationObserver) {
+      state.mutationObserver.disconnect();
+      state.observers = state.observers.filter((observer) => observer !== state.mutationObserver);
+      state.mutationObserver = null;
+      state.mutationObserverTarget = null;
+    }
+
     const observer = new MutationObserver((mutations) => {
       if (mutations.some((mutation) => mutation.type === "childList" || mutation.type === "characterData")) {
+        debugLog("mutation", {
+          target: target.tagName || "unknown",
+          childList: mutations.filter((mutation) => mutation.type === "childList").length,
+          characterData: mutations.filter((mutation) => mutation.type === "characterData").length
+        });
+        scheduleNativeMinimapSuppression();
         debouncedRebuild();
       }
     });
@@ -501,12 +1175,19 @@
       characterData: true
     });
 
+    state.mutationObserver = observer;
+    state.mutationObserverTarget = target;
     state.observers.push(observer);
   }
 
   function setupTemporaryBodyObserver() {
     const observer = new MutationObserver((mutations) => {
       if (mutations.some((mutation) => mutation.type === "childList" || mutation.type === "characterData")) {
+        debugLog("temporary body mutation", {
+          childList: mutations.filter((mutation) => mutation.type === "childList").length,
+          characterData: mutations.filter((mutation) => mutation.type === "characterData").length
+        });
+        scheduleNativeMinimapSuppression();
         debouncedRebuild();
       }
     });
@@ -525,7 +1206,7 @@
     }, 5000));
   }
 
-  function cleanupRuntime() {
+  function cleanupRuntime({ disposeNavigation = false } = {}) {
     initializationRunId += 1;
 
     for (const observer of state.observers) {
@@ -548,6 +1229,21 @@
       window.removeEventListener("resize", state.resizeHandler);
     }
 
+    if (disposeNavigation) {
+      if (navigationHandler) {
+        window.removeEventListener("popstate", navigationHandler);
+        window.removeEventListener("hashchange", navigationHandler);
+        window.removeEventListener("autotoc:navigation", navigationHandler);
+        navigationHandler = null;
+      }
+
+      if (navigationPollId !== null) {
+        clearInterval(navigationPollId);
+        navigationPollId = null;
+      }
+    }
+
+    restoreHiddenNativeMinimapElements();
     state.root?.remove();
     resetState();
   }
@@ -555,6 +1251,10 @@
   function rebuild() {
     if (state.rebuilding) return;
     state.rebuilding = true;
+    debugLog("rebuild start", {
+      cachedQuestions: state.qaCache.size,
+      scrollTop: Math.round(getScrollTop())
+    });
 
     for (const intervalId of state.intervals) {
       clearInterval(intervalId);
@@ -569,12 +1269,19 @@
     state.scrollHandler = null;
 
     parseQABlocks();
+    setupNativeMinimapSuppression();
+    setupMutationObserver();
     updateActiveFromScroll();
     renderUI();
     setupScrollTracking();
     setupViewportCenterTracking();
 
     state.rebuilding = false;
+    debugLog("rebuild complete", {
+      renderedQuestions: state.qaBlocks.length,
+      mountedQuestions: state.qaBlocks.filter((qaBlock) => qaBlock.isMounted).length,
+      activeQAKey: state.activeQAKey
+    });
   }
 
   function waitForConversationContent() {
@@ -608,6 +1315,8 @@
     state.initialized = true;
     state.conversationId = extractConversationId();
     ensureRoot();
+    setupNativeMinimapSuppression();
+    suppressNativeRightRailMinimap();
 
     await waitForConversationContent();
     if (runId !== initializationRunId) return;
@@ -656,10 +1365,21 @@
     window.addEventListener("popstate", onNavigation);
     window.addEventListener("hashchange", onNavigation);
     window.addEventListener("autotoc:navigation", onNavigation);
+    navigationHandler = onNavigation;
 
     navigationPollId = window.setInterval(onNavigation, 500);
   }
 
+  const cleanupCurrentInstance = () => {
+    cleanupRuntime({ disposeNavigation: true });
+    if (window[GLOBAL_CLEANUP_KEY] === cleanupCurrentInstance) {
+      delete window[GLOBAL_CLEANUP_KEY];
+    }
+  };
+
+  window[GLOBAL_CLEANUP_KEY] = cleanupCurrentInstance;
+
+  removeForeignRoots();
   setupNavigationListener();
   initialize();
 })();

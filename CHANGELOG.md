@@ -2,6 +2,55 @@
 
 All notable changes to AutoToC will be documented in this file.
 
+## [1.0.0] - 2026-06-23
+
+- Promote AutoToC to its first stable release.
+- Add English and Korean README documentation for installation, usage, behavior, troubleshooting, and privacy.
+- Document the collapsed heading summary policy: the active answer ToC is summarized when the estimated collapsed list would exceed 80% of the viewport or when adjacent heading scroll positions are closer than 48px.
+
+## [0.1.13] - 2026-06-23
+
+- Restore collapsed question dot markers for every cached question while keeping the active answer ToC rendering unchanged.
+- Suppress ChatGPT/native right-rail minimap bar groups outside AutoToC when they overlap the collapsed icon area.
+- Add `[AutoToC] native right rail minimap suppressed` diagnostics for hidden non-AutoToC bar groups.
+
+## [0.1.12] - 2026-06-23
+
+- Superseded by 0.1.13. The collapsed question dot markers are part of the intended UI and should remain visible.
+
+## [0.1.11] - 2026-06-23
+
+- Enforce a single AutoToC content-script instance by exposing and invoking a runtime cleanup hook.
+- Remove stale AutoToC roots left by earlier extension reloads so old question-level collapsed indicators cannot overlap the current UI.
+- Hide legacy AutoToC roots that do not carry a current instance marker.
+- Clear the navigation polling interval during cleanup.
+
+## [0.1.10] - 2026-06-23
+
+- Increase the Q&A top activation margin so question jumps keep the clicked question active and avoid clipping its first line.
+- Treat the scroll area above the first question as the first question so the first ToC remains visible at the top of the conversation.
+- Replace omitted collapsed heading bars with a compact three-bar ToC summary icon when the detailed bars would be too tall or too tightly spaced.
+
+## [0.1.9] - 2026-06-23
+
+- Apply a small top-anchor offset only to Q&A activation so question clicks do not keep the previous question's ToC open.
+- Keep heading activation on the real viewport top to avoid over-selecting nearby headings.
+- Suppress collapsed mini heading bars when headings are too tightly spaced, while preserving the expanded ToC.
+
+## [0.1.8] - 2026-06-23
+
+- Cache previously observed Q&A blocks so ChatGPT DOM virtualization does not shrink AutoToC to only nearby messages.
+- Keep cached heading labels and scroll positions available when their source DOM nodes are temporarily unmounted.
+- Add verbose `[AutoToC]` console diagnostics for parsing, rendering, active-scroll state, mutations, clicks, and streaming transitions.
+
+## [0.1.7] - 2026-06-23
+
+- Fixed missed ToC updates after sending or editing messages by observing the stable ChatGPT conversation root.
+- Mark the Q&A block that actually owns the streaming answer instead of always marking the last question.
+- Keep the expanded panel viewport-fixed and independently scrollable to avoid clipped question entries.
+- Show the streaming spinner in both the collapsed icon column and expanded panel.
+- Match active Q&A and heading detection to the viewport top so clicked headings stay selected after scrolling.
+
 ## [0.1.6] - 2026-06-23
 
 - Lowered collapsed icon overflow threshold from 90% to 80% of the viewport height.
