@@ -2,6 +2,11 @@
 
 All notable changes to AutoToC will be documented in this file.
 
+## [1.0.2] - 2026-06-24
+
+- Add 16, 32, 48, and 128 pixel extension icons generated from the supplied source image.
+- Configure the Chrome extension manifest to use the new icon set.
+
 ## [1.0.1] - 2026-06-24
 
 - Remove non-error console diagnostics, debug state, and the local storage debug toggle.
