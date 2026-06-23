@@ -197,27 +197,10 @@
   }
 
   function filterHeadings(headings) {
-    if (headings.length === 0) return [];
+    if (headings.length <= 0) return [];
     if (headings.length <= 10) return headings;
 
-    const counts = [0, 0, 0, 0, 0, 0, 0];
-    for (const heading of headings) {
-      counts[heading.level] += 1;
-    }
-
-    let maxLevel = 2;
-    let cumulative = counts[1] + counts[2];
-
-    for (let level = 3; level <= 6; level += 1) {
-      if (cumulative + counts[level] <= 10) {
-        cumulative += counts[level];
-        maxLevel = level;
-      } else {
-        break;
-      }
-    }
-
-    return headings.filter((heading) => heading.level <= maxLevel);
+    return headings.filter((heading) => heading.level <= 4);
   }
 
   function ensureRoot() {
