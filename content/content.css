@@ -118,6 +118,25 @@
   width: 100%;
 }
 
+.autotoc-panel .autotoc-toc-group {
+  max-height: 70vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.autotoc-panel .autotoc-toc-group::-webkit-scrollbar {
+  width: 3px;
+}
+
+.autotoc-panel .autotoc-toc-group::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 3px;
+}
+
+.autotoc-panel .autotoc-toc-group::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .autotoc-icon,
 .autotoc-dash,
 .autotoc-spinner {

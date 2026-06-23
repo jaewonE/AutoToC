@@ -9,6 +9,10 @@
     codeBlock: "pre, code"
   };
 
+  const COLLAPSED_ITEM_HEIGHT = 20;
+  const COLLAPSED_PATTERN_LIMIT_RATIO = 0.95;
+  const TOC_HEIGHT_LIMIT_RATIO = 0.7;
+
   function createDefaultState() {
     return {
       conversationId: null,
@@ -20,6 +24,7 @@
       root: null,
       collapsed: null,
       panel: null,
+      collapsedHeadingHighlightEnabled: true,
       observers: [],
       intervals: [],
       timeouts: [],
@@ -205,6 +210,53 @@
     return headings.filter((heading) => heading.level <= 4);
   }
 
+  function sampleHeadingsByOrder(headings, maxCount) {
+    if (maxCount >= headings.length) return headings;
+    if (maxCount <= 0) return [];
+    if (maxCount === 1) return [headings[0]];
+
+    const selected = [];
+    const lastIndex = headings.length - 1;
+
+    for (let index = 0; index < maxCount; index += 1) {
+      const headingIndex = Math.round((index * lastIndex) / (maxCount - 1));
+      const heading = headings[headingIndex];
+      if (heading && selected[selected.length - 1] !== heading) {
+        selected.push(heading);
+      }
+    }
+
+    return selected;
+  }
+
+  function getCollapsedHeadingDisplay(headings) {
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const patternLimit = viewportHeight * COLLAPSED_PATTERN_LIMIT_RATIO;
+    const tocLimit = viewportHeight * TOC_HEIGHT_LIMIT_RATIO;
+    const fullPatternHeight = (state.qaBlocks.length + headings.length) * COLLAPSED_ITEM_HEIGHT;
+    const tocHeight = headings.length * COLLAPSED_ITEM_HEIGHT;
+
+    if (fullPatternHeight > patternLimit) {
+      return {
+        headings: [],
+        highlightEnabled: false
+      };
+    }
+
+    if (tocHeight > tocLimit) {
+      const maxCount = Math.max(1, Math.floor(tocLimit / COLLAPSED_ITEM_HEIGHT));
+      return {
+        headings: sampleHeadingsByOrder(headings, maxCount),
+        highlightEnabled: false
+      };
+    }
+
+    return {
+      headings,
+      highlightEnabled: true
+    };
+  }
+
   function ensureRoot() {
     if (state.root?.isConnected && state.collapsed?.isConnected && state.panel?.isConnected) return;
 
@@ -308,6 +360,7 @@
     ensureRoot();
     state.collapsed.replaceChildren();
     state.panel.replaceChildren();
+    state.collapsedHeadingHighlightEnabled = true;
     state.root.classList.toggle("is-empty", state.qaBlocks.length === 0);
 
     for (const qaBlock of state.qaBlocks) {
@@ -317,18 +370,26 @@
       if (qaBlock.index === state.activeQAIndex && !qaBlock.isStreaming) {
         const filteredHeadings = filterHeadings(qaBlock.headings);
         if (filteredHeadings.length) {
+          const collapsedHeadingDisplay = getCollapsedHeadingDisplay(filteredHeadings);
+          state.collapsedHeadingHighlightEnabled = collapsedHeadingDisplay.highlightEnabled;
           const collapsedTocGroup = document.createElement("div");
           collapsedTocGroup.className = "autotoc-toc-group";
           const panelTocGroup = document.createElement("div");
           panelTocGroup.className = "autotoc-toc-group";
 
-          for (const heading of filteredHeadings) {
+          for (const heading of collapsedHeadingDisplay.headings) {
             const originalIndex = qaBlock.headings.indexOf(heading);
             collapsedTocGroup.append(createCollapsedHeadingItem(heading, originalIndex));
+          }
+
+          for (const heading of filteredHeadings) {
+            const originalIndex = qaBlock.headings.indexOf(heading);
             panelTocGroup.append(createPanelHeadingItem(heading, originalIndex));
           }
 
-          state.collapsed.append(collapsedTocGroup);
+          if (collapsedHeadingDisplay.headings.length) {
+            state.collapsed.append(collapsedTocGroup);
+          }
           state.panel.append(panelTocGroup);
         }
       }
@@ -350,8 +411,14 @@
     }
 
     if (state.activeHeadingIndex >= 0) {
-      for (const activeHeadingItem of state.root.querySelectorAll(`.autotoc-toc-item[data-heading="${state.activeHeadingIndex}"]`)) {
+      for (const activeHeadingItem of state.panel.querySelectorAll(`.autotoc-toc-item[data-heading="${state.activeHeadingIndex}"]`)) {
         activeHeadingItem.classList.add("is-active");
+      }
+
+      if (state.collapsedHeadingHighlightEnabled) {
+        for (const activeHeadingItem of state.collapsed.querySelectorAll(`.autotoc-toc-item[data-heading="${state.activeHeadingIndex}"]`)) {
+          activeHeadingItem.classList.add("is-active");
+        }
       }
     }
   }
