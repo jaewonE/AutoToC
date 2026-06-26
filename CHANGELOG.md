@@ -2,6 +2,10 @@
 
 All notable changes to AutoToC will be documented in this file.
 
+## [1.0.3] - 2026-06-26
+
+- Replace the extension icon set with transparent-background AutoToC artwork at 16, 32, 38, and 128 pixels.
+
 ## [1.0.2] - 2026-06-24
 
 - Add 16, 32, 48, and 128 pixel extension icons generated from the supplied source image.
