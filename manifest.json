@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AutoToC",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Auto-generates a hoverable Table of Contents sidebar for ChatGPT conversations.",
   "icons": {
     "16": "icons/icon16.png",

@@ -201,6 +201,36 @@
     return Boolean(headingElement.closest(SELECTORS.codeBlock));
   }
 
+  function isHiddenFromTOC(element) {
+    let current = element;
+    while (current && current !== document.documentElement) {
+      if (!(current instanceof HTMLElement)) {
+        current = current.parentElement;
+        continue;
+      }
+
+      if (current.hidden || current.getAttribute("aria-hidden") === "true" || current.hasAttribute("inert")) {
+        return true;
+      }
+
+      const style = window.getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") {
+        return true;
+      }
+
+      current = current.parentElement;
+    }
+
+    return false;
+  }
+
+  function getMarkdownSearchRoots(answerElement) {
+    const roots = Array.from(answerElement.querySelectorAll(SELECTORS.markdownBody));
+    if (!roots.length) return [answerElement];
+
+    return roots.filter((root) => !roots.some((candidate) => candidate !== root && candidate.contains(root)));
+  }
+
   function normalizeText(text, maxLength) {
     const normalized = (text || "").replace(/\s+/g, " ").trim();
     return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
@@ -263,20 +293,22 @@
 
   function extractHeadingsFromAnswers(answerElements) {
     const headings = [];
+    const seenHeadingElements = new WeakSet();
 
     for (const answerElement of answerElements) {
-      const searchRoots = answerElement.querySelectorAll(SELECTORS.markdownBody).length
-        ? answerElement.querySelectorAll(SELECTORS.markdownBody)
-        : [answerElement];
+      const searchRoots = getMarkdownSearchRoots(answerElement);
 
       for (const root of searchRoots) {
         for (const headingElement of root.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
+          if (seenHeadingElements.has(headingElement)) continue;
           if (isInsideCodeBlock(headingElement)) continue;
           if (headingElement.closest(SELECTORS.userMessage)) continue;
+          if (isHiddenFromTOC(headingElement)) continue;
 
           const text = normalizeText(headingElement.textContent, 200);
           if (!text) continue;
 
+          seenHeadingElements.add(headingElement);
           headings.push({
             level: Number(headingElement.tagName.slice(1)),
             text,

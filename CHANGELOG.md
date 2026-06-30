@@ -2,6 +2,10 @@
 
 All notable changes to AutoToC will be documented in this file.
 
+## [1.0.4] - 2026-06-30
+
+- Prevent duplicate answer ToC entries when ChatGPT renders headings inside nested or hidden special UI containers.
+
 ## [1.0.3] - 2026-06-26
 
 - Replace the extension icon set with transparent-background AutoToC artwork at 16, 32, 38, and 128 pixels.
